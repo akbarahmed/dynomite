@@ -94,6 +94,18 @@ core_ctx_create(struct instance *nci)
 		return NULL;
 	}
 
+	/* SSL connection for reconciliation */
+	ctx->recon_conn = recon_init(nci->recon_port, nci->recon_addr, nci->recon_interval
+			nci->recon_hostname ctx);
+    if (status != DN_OK) {
+   	    loga("Failed to initialize SSL connection for reconciliation!!!");
+		crypto_deinit();
+		server_pool_deinit(&ctx->pool);
+		conf_destroy(ctx->cf);
+    	dn_free(ctx);
+    	return NULL;
+    }
+
 	/* initialize event handling for client, proxy and server */
 	ctx->evb = event_base_create(EVENT_SIZE, &core_core);
 	if (ctx->evb == NULL) {

@@ -934,7 +934,7 @@ parse_request(int sd, struct stats_cmd *st_cmd)
     if (rcvd < 0) {
         log_debug(LOG_VERB, "stats recv error");
     } else if (rcvd == 0) {   // receive socket closed
-        log_debug(LOG_VERB, "Client disconnected upexpectedly");
+        log_debug(LOG_VERB, "Client disconnected unexpectedly");
     } else  {  // message received
         log_debug(LOG_VERB, "%s", mesg);
         reqline[0] = strtok(mesg, " \t\n");

@@ -128,6 +128,7 @@ struct dyn_ring;
 #include "dyn_log.h"
 #include "dyn_util.h"
 #include "dyn_stats.h"
+#include "dyn_sec_recon.h"
 #include "dyn_mbuf.h"
 #include "dyn_message.h"
 #include "dyn_connection.h"
@@ -168,7 +169,7 @@ struct context {
     uint32_t           id;          /* unique context id */
     struct conf        *cf;         /* configuration */
     struct stats       *stats;      /* stats */
-
+    struct recon_conn  *recon_conn  /* reconcilation connection */
     struct array       pool;        /* server_pool[] */
     struct event_base  *evb;        /* event base */
     int                max_timeout; /* max timeout in msec */
@@ -189,8 +190,12 @@ struct instance {
     int             stats_interval;              /* stats aggregation interval */
     char            *stats_addr;                 /* stats monitoring addr */
     char            hostname[DN_MAXHOSTNAMELEN]; /* hostname */
+    uint16_t        recon_port;                  /* reconciliation monitoring port */
+    int             recon_interval;              /* reconciliation aggregation interval */
+    char            *recon_addr;                 /* reconciliation monitoring addr */
+    char            recon_hostname[DN_MAXHOSTNAMELEN]; /* reconciliation hostname */
     size_t          mbuf_chunk_size;             /* mbuf chunk size */
-    size_t			alloc_msgs_max;			 /* allocated messages buffer size */
+    size_t			alloc_msgs_max;			     /* allocated messages buffer size */
     pid_t           pid;                         /* process id */
     char            *pid_filename;               /* pid filename */
     unsigned        pidfile:1;                   /* pid file created? */
