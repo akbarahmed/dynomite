@@ -56,7 +56,7 @@
  * Request received over the client connection are forwarded to the server by
  * enqueuing the request in the chosen server's in_q. From the client's
  * perspective once the request is forwarded, it is outstanding and is tracked
- * in the client's out_q (unless the request was tagged as noreply). The server
+ * in the client's out_q (unless the request was tagged as !expect_datastore_reply). The server
  * in turn picks up requests from its own in_q in fifo order and puts them on
  * the wire. Once the request is outstanding on the wire, and a response is
  * expected for it, the server keeps track of outstanding requests it in its
@@ -97,6 +97,23 @@ static struct conn_tqh free_connq; /* free conn q */
 
 consistency_t g_read_consistency = DEFAULT_READ_CONSISTENCY;
 consistency_t g_write_consistency = DEFAULT_WRITE_CONSISTENCY;
+
+inline char *
+conn_get_type_string(struct conn *conn)
+{
+    switch(conn->type) {
+        case CONN_UNSPECIFIED: return "UNSPEC";
+        case CONN_PROXY : return "PROXY";
+        case CONN_CLIENT: return "CLIENT";
+        case CONN_SERVER: return "SERVER";
+        case CONN_DNODE_PEER_PROXY: return "PEER_PROXY";
+        case CONN_DNODE_PEER_CLIENT: return conn->same_dc ?
+                                            "LOCAL_PEER_CLIENT" : "REMOTE_PEER_CLIENT";
+        case CONN_DNODE_PEER_SERVER: return conn->same_dc ?
+                                            "LOCAL_PEER_SERVER" : "REMOTE_PEER_SERVER";
+    }
+    return "INVALID";
+}
 
 /*
  * Return the context associated with this connection.
@@ -183,7 +200,6 @@ _conn_get(void)
     conn->same_dc = 1;
     conn->avail_tokens = msgs_per_sec();
     conn->last_sent = 0;
-    conn->last_received = 0;
     conn->attempted_reconnect = 0;
     conn->non_bytes_recv = 0;
     //conn->non_bytes_send = 0;
@@ -191,8 +207,8 @@ _conn_get(void)
     conn_set_write_consistency(conn, g_write_consistency);
     conn->type = CONN_UNSPECIFIED;
 
-    unsigned char *ase_key = generate_aes_key();
-    strncpy(conn->aes_key, ase_key, strlen(ase_key)); //generate a new key for each connection
+    unsigned char *aes_key = generate_aes_key();
+    strncpy((char *)conn->aes_key, (char *)aes_key, strlen((char *)aes_key)); //generate a new key for each connection
 
     return conn;
 }

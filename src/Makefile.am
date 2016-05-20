@@ -10,14 +10,13 @@ AM_CPPFLAGS += -I $(top_srcdir)/src/event
 AM_CPPFLAGS += -I $(top_srcdir)/src/seedsprovider
 AM_CPPFLAGS += -I $(top_srcdir)/contrib/yaml-0.1.4/include
 
-AM_CFLAGS =
-AM_CFLAGS += -Wall -Wshadow
+AM_CFLAGS = -Wall -Wshadow
 AM_CFLAGS += -Wpointer-arith
 AM_CFLAGS += -Winline
 AM_CFLAGS += -Wunused-function -Wunused-variable -Wunused-value
 AM_CFLAGS += -Wno-unused-parameter -Wno-unused-value
 AM_CFLAGS += -Wconversion -Wsign-compare
-AM_CFLAGS += -Wstrict-prototypes -Wmissing-prototypes -Wredundant-decls -Wmissing-declarations -Werror=implicit-function-declaration
+AM_CFLAGS += -Wstrict-prototypes -Wmissing-prototypes -Wredundant-decls -Wmissing-declarations -Wimplicit-function-declaration
 
 AM_LDFLAGS =
 AM_LDFLAGS += -lm -lpthread -rdynamic
@@ -29,7 +28,7 @@ endif
 
 SUBDIRS = hashkit proto event seedsprovider tools
 
-sbin_PROGRAMS = dynomite test
+sbin_PROGRAMS = dynomite dynomite-test
 
 dynomite_SOURCES =			                          \
         dyn_cbuf.h                                                \
@@ -41,12 +40,12 @@ dynomite_SOURCES =			                          \
         dyn_dnode_msg.c dyn_dnode_msg.h                           \
         dyn_dnode_peer.c  dyn_dnode_peer.h                        \
         dyn_dnode_request.c                                       \
-        dyn_dnode_proxy.c dyn_dnode_proxy.h                     \
+        dyn_dnode_proxy.c dyn_dnode_proxy.h                       \
         dyn_histogram.c dyn_histogram.h                           \
-        dyn_server.c dyn_server.h		                          \
-        dyn_proxy.c dyn_proxy.h		                              \
-        dyn_message.c dyn_message.h	                              \
-        dyn_request.c dyn_response_mgr.c	                      \
+        dyn_server.c dyn_server.h		                  \
+        dyn_proxy.c dyn_proxy.h		                          \
+        dyn_message.c dyn_message.h	                          \
+        dyn_request.c dyn_response_mgr.c	                  \
         dyn_response.c			                          \
         dyn_ring_queue.h dyn_ring_queue.c                         \
         dyn_mbuf.c dyn_mbuf.h		                          \
@@ -61,7 +60,7 @@ dynomite_SOURCES =			                          \
         dyn_string.c dyn_string.h		                  \
         dyn_array.c dyn_array.h		                          \
         dyn_util.c dyn_util.h		                          \
-        dyn_queue.h			                                      \
+        dyn_queue.h			                          \
         dyn_gossip.c dyn_gossip.h                                 \
         dyn_dict.c dyn_dict.h                                     \
         dyn_asciilogo.h                                           \
@@ -75,7 +74,7 @@ dynomite_LDADD += $(top_builddir)/contrib/yaml-0.1.4/src/.libs/libyaml.a
 
 
 
-test_SOURCES =                                                \
+dynomite_test_SOURCES =                                           \
         dyn_cbuf.h                                                \
         dyn_crypto.c dyn_crypto.h                                 \
         dyn_core.c dyn_core.h                                     \
@@ -85,12 +84,12 @@ test_SOURCES =                                                \
         dyn_dnode_msg.c dyn_dnode_msg.h                           \
         dyn_dnode_peer.c  dyn_dnode_peer.h                        \
         dyn_dnode_request.c                                       \
-        dyn_dnode_proxy.c dyn_dnode_proxy.h                     \
+        dyn_dnode_proxy.c dyn_dnode_proxy.h                       \
         dyn_histogram.c dyn_histogram.h                           \
         dyn_server.c dyn_server.h                                 \
         dyn_proxy.c dyn_proxy.h                                   \
         dyn_message.c dyn_message.h                               \
-        dyn_request.c dyn_response_mgr.c	                      \
+        dyn_request.c dyn_response_mgr.c	                  \
         dyn_response.c                                            \
         dyn_ring_queue.h dyn_ring_queue.c                         \
         dyn_mbuf.c dyn_mbuf.h                                     \
@@ -112,19 +111,18 @@ test_SOURCES =                                                \
         dyn_test.c
 
 
-test_LDADD = $(top_builddir)/src/hashkit/libhashkit.a
-test_LDADD += $(top_builddir)/src/proto/libproto.a
-test_LDADD += $(top_builddir)/src/event/libevent.a
-test_LDADD +=  $(top_builddir)/src/seedsprovider/libseedsprovider.a -lresolv
-test_LDADD += $(top_builddir)/contrib/yaml-0.1.4/src/.libs/libyaml.a
+dynomite_test_LDADD = $(top_builddir)/src/hashkit/libhashkit.a
+dynomite_test_LDADD += $(top_builddir)/src/proto/libproto.a
+dynomite_test_LDADD += $(top_builddir)/src/event/libevent.a
+dynomite_test_LDADD +=  $(top_builddir)/src/seedsprovider/libseedsprovider.a -lresolv
+dynomite_test_LDADD += $(top_builddir)/contrib/yaml-0.1.4/src/.libs/libyaml.a
 
 if OS_BSD
 dynomite_SOURCES +=                                               \
 	$(top_builddir)/contrib/fmemopen.c                        \
 	$(top_builddir)/contrib/fmemopen.h
-test_SOURCES +=                                                   \
+dynomite_test_SOURCES +=                                          \
 	$(top_builddir)/contrib/fmemopen.c                        \
 	$(top_builddir)/contrib/fmemopen.h
 endif
-
 

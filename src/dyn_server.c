@@ -70,7 +70,7 @@ server_unref(struct conn *conn)
 			server->pname.len, server->pname.data);
 }
 
-int
+msec_t
 server_timeout(struct conn *conn)
 {
 	struct server *server;
@@ -258,7 +258,7 @@ static void
 server_failure(struct context *ctx, struct server *server)
 {
 	struct server_pool *pool = server->owner;
-	int64_t now, next;
+	msec_t now, next;
 	rstatus_t status;
 
 	if (!pool->auto_eject_hosts) {
@@ -275,19 +275,19 @@ server_failure(struct context *ctx, struct server *server)
 		return;
 	}
 
-	now = dn_usec_now();
-	if (now < 0) {
+	now = dn_msec_now();
+	if (now == 0) {
 		return;
 	}
 
 	stats_server_set_ts(ctx, server, server_ejected_at, now);
 
-	next = now + pool->server_retry_timeout;
+	next = now + pool->server_retry_timeout_ms;
 
 	log_debug(LOG_INFO, "update pool %"PRIu32" '%.*s' to delete server '%.*s' "
 			"for next %"PRIu32" secs", pool->idx, pool->name.len,
 			pool->name.data, server->pname.len, server->pname.data,
-			pool->server_retry_timeout / 1000 / 1000);
+			pool->server_retry_timeout_ms/1000);
 
 	stats_pool_incr(ctx, pool, server_ejects);
 
@@ -338,7 +338,7 @@ server_ack_err(struct context *ctx, struct conn *conn, struct msg *req)
 {
     // I want to make sure we do not have swallow here.
     //ASSERT_LOG(!req->swallow, "req %d:%d has swallow set??", req->id, req->parent_id);
-    if ((req->swallow && req->noreply) ||
+    if ((req->swallow && !req->expect_datastore_reply) ||
         (req->swallow && (req->consistency == DC_ONE)) ||
         (req->swallow && (req->consistency == DC_QUORUM)
                       && (!conn->same_dc))) {
@@ -572,7 +572,7 @@ server_ok(struct context *ctx, struct conn *conn)
 				 server->failure_count);
            }
            server->failure_count = 0;
-           server->next_retry = 0LL;
+           server->next_retry = 0ULL;
 	}
 }
 
@@ -580,19 +580,19 @@ static rstatus_t
 server_pool_update(struct server_pool *pool)
 {
 	rstatus_t status;
-	int64_t now;
+	usec_t now;
 	uint32_t pnlive_server; /* prev # live server */
 
 	if (!pool->auto_eject_hosts) {
 		return DN_OK;
 	}
 
-	if (pool->next_rebuild == 0LL) {
+	if (pool->next_rebuild == 0ULL) {
 		return DN_OK;
 	}
 
 	now = dn_usec_now();
-	if (now < 0) {
+	if (now == 0) {
 		return DN_ERROR;
 	}
 
@@ -881,6 +881,7 @@ dc_init(struct datacenter *dc)
 	dc->dict_rack = dictCreate(&dc_string_dict_type, NULL);
 	dc->name = dn_alloc(sizeof(struct string));
 	string_init(dc->name);
+    dc->preselected_rack_for_replication = NULL;
 
 	status = array_init(&dc->racks, 3, sizeof(struct rack));
 
@@ -1089,7 +1090,7 @@ server_rsp_filter(struct context *ctx, struct conn *conn, struct msg *msg)
         return true;
     }
 
-    if (pmsg->noreply) {
+    if (!pmsg->expect_datastore_reply) {
          conn_dequeue_outq(ctx, conn, pmsg);
          req_put(pmsg);
          rsp_put(msg);
@@ -1259,11 +1260,11 @@ req_send_done(struct context *ctx, struct conn *conn, struct msg *msg)
     conn_dequeue_inq(ctx, conn, msg);
 
     /*
-     * noreply request instructs the server not to send any response. So,
+     * expect_datastore_reply request instructs the server to send response. So,
      * enqueue message (request) in server outq, if response is expected.
-     * Otherwise, free the noreply request
+     * Otherwise, free the request
      */
-    if (!msg->noreply || (conn->type == CONN_SERVER))
+    if (msg->expect_datastore_reply || (conn->type == CONN_SERVER))
         conn_enqueue_outq(ctx, conn, msg);
     else
         req_put(msg);
@@ -1280,10 +1281,10 @@ req_server_enqueue_imsgq(struct context *ctx, struct conn *conn, struct msg *msg
      * the server in_q; the clock continues to tick until it either expires
      * or the message is dequeued from the server out_q
      *
-     * noreply request are free from timeouts because client is not interested
-     * in the reponse anyway!
+     * expect_datastore_reply request have timeouts because client is expecting
+     * a response
      */
-    if (!msg->noreply) {
+    if (msg->expect_datastore_reply) {
         msg_tmo_insert(msg, conn);
     }
 

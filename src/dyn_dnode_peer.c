@@ -15,7 +15,8 @@
 #include "dyn_token.h"
 
 
-bool is_same_dc(struct server_pool *sp, struct server *peer_node)
+static bool
+is_same_dc(struct server_pool *sp, struct server *peer_node)
 {
     return string_compare(&sp->dc, &peer_node->dc) == 0;
 }
@@ -64,7 +65,7 @@ dnode_peer_unref(struct conn *conn)
     }
 }
 
-int
+msec_t
 dnode_peer_timeout(struct msg *msg, struct conn *conn)
 {
     struct server *server;
@@ -74,7 +75,7 @@ dnode_peer_timeout(struct msg *msg, struct conn *conn)
 
     server = conn->owner;
     pool = server->owner;
-   int additional_timeout = 0;
+    msec_t additional_timeout = 0;
 
    if (conn->same_dc)
        additional_timeout = 200;
@@ -138,7 +139,7 @@ dnode_peer_add_local(struct server_pool *pool, struct server *peer)
 
     uint8_t *p = pool->d_addrstr.data + pool->d_addrstr.len - 1;
     uint8_t *start = pool->d_addrstr.data;
-    string_copy(&peer->name, start, dn_strrchr(p, start, ':') - start);
+    string_copy(&peer->name, start, (uint32_t)(dn_strrchr(p, start, ':') - start));
 
     //peer->name = pool->d_addrstr;
     peer->port = pool->d_port;
@@ -156,9 +157,10 @@ dnode_peer_add_local(struct server_pool *pool, struct server *peer)
     peer->ns_conn_q = 0;
     TAILQ_INIT(&peer->s_conn_q);
 
-    peer->next_retry = 0LL;
+    peer->next_retry = 0ULL;
     peer->failure_count = 0;
     peer->is_seed = 1;
+    peer->processed = 0;
     string_copy(&peer->dc, pool->dc.data, pool->dc.len);
     peer->owner = pool;
 
@@ -459,7 +461,7 @@ dnode_peer_connect(struct context *ctx, struct server *server, struct conn *conn
 static void
 dnode_peer_ack_err(struct context *ctx, struct conn *conn, struct msg *req)
 {
-    if ((req->swallow && req->noreply) || // no reply
+    if ((req->swallow && !req->expect_datastore_reply) || // no reply
         (req->swallow && (req->consistency == DC_ONE)) || // dc one
         (req->swallow && (req->consistency == DC_QUORUM) // remote dc request
                       && (!conn->same_dc)) ||
@@ -507,7 +509,7 @@ static void
 dnode_peer_failure(struct context *ctx, struct server *server)
 {
     struct server_pool *pool = server->owner;
-    int64_t now;
+    msec_t now;
     rstatus_t status;
 
     server->failure_count++;
@@ -527,7 +529,7 @@ dnode_peer_failure(struct context *ctx, struct server *server)
        log_debug(LOG_INFO, "dyn: update peer pool %"PRIu32" '%.*s' for peer '%.*s' "
                "for next %"PRIu32" secs", pool->idx, pool->name.len,
                pool->name.data, server->pname.len, server->pname.data,
-               pool->server_retry_timeout / 1000 / 1000);
+               pool->server_retry_timeout_ms/1000);
     }
 
     stats_pool_incr(ctx, pool, peer_ejects);
@@ -750,11 +752,10 @@ dnode_peer_forward_state(void *rmsg)
     mbuf_copy(mbuf, msg->data, msg->len);
 
     struct array *peers = &sp->peers;
-    uint32_t nelem;
-    nelem = array_n(peers);
+    uint32_t nelem = array_n(peers);
 
     //pick a random peer
-    int ran_index = rand() % nelem;
+    uint32_t ran_index = (uint32_t)rand() % nelem;
 
     if (ran_index == 0)
        ran_index += 1;
@@ -820,13 +821,13 @@ dnode_peer_handshake_announcing(void *rmsg)
     mbuf_write_uint32(mbuf, token->mag[0]);
     mbuf_write_char(mbuf, ',');
     int64_t cur_ts = (int64_t)time(NULL);
-    mbuf_write_uint64(mbuf, cur_ts);
+    mbuf_write_uint64(mbuf, (uint64_t)cur_ts);
     mbuf_write_char(mbuf, ',');
     mbuf_write_uint8(mbuf, sp->ctx->dyn_state);
     mbuf_write_char(mbuf, ',');
 
-    char *broadcast_addr = get_broadcast_address(sp);
-    mbuf_write_bytes(mbuf, broadcast_addr, dn_strlen(broadcast_addr));
+    unsigned char *broadcast_addr = (unsigned char *)get_broadcast_address(sp);
+    mbuf_write_bytes(mbuf, broadcast_addr, (int)dn_strlen(broadcast_addr));
 
     //for each peer, send a registered msg
     for (i = 0; i < nelem; i++) {
@@ -923,7 +924,7 @@ dnode_peer_add_node(struct server_pool *sp, struct node *node)
     s->ns_conn_q = 0;
     TAILQ_INIT(&s->s_conn_q);
 
-    s->next_retry = 0LL;
+    s->next_retry = 0ULL;
     s->failure_count = 0;
     s->is_seed = node->is_seed;
 
@@ -1116,16 +1117,14 @@ dnode_peer_ok(struct context *ctx, struct conn *conn)
                 " to 0", server->pname.len, server->pname.data,
                 server->failure_count);
         server->failure_count = 0;
-        server->next_retry = 0LL;
+        server->next_retry = 0ULL;
     }
 }
 
 static rstatus_t
 dnode_peer_pool_update(struct server_pool *pool)
 {
-    int64_t now;
-
-    now = dn_msec_now();
+    msec_t now = dn_msec_now();
     if (now < 0) {
         return DN_ERROR;
     }
@@ -1325,6 +1324,7 @@ dnode_peer_pool_preconnect(struct context *ctx)
     return DN_OK;
 }
 
+/*
 static rstatus_t
 dnode_peer_pool_each_disconnect(void *elem, void *data)
 {
@@ -1345,7 +1345,7 @@ dnode_peer_pool_disconnect(struct context *ctx)
     array_each(&ctx->pool, dnode_peer_pool_each_disconnect, NULL);
 }
 
-void
+static void
 dnode_peer_pool_deinit(struct array *server_pool)
 {
     uint32_t i, npool;
@@ -1371,14 +1371,12 @@ dnode_peer_pool_deinit(struct array *server_pool)
 
     log_debug(LOG_DEBUG, "deinit %"PRIu32" peer pools", npool);
 }
-
+*/
 
 static struct msg *
 dnode_rsp_recv_next(struct context *ctx, struct conn *conn, bool alloc)
 {
     ASSERT(conn->type == CONN_DNODE_PEER_SERVER);
-
-    conn->last_received = time(NULL);
 
     return rsp_recv_next(ctx, conn, alloc);
 }
@@ -1400,8 +1398,8 @@ dnode_rsp_filter(struct context *ctx, struct conn *conn, struct msg *msg)
 
     pmsg = TAILQ_FIRST(&conn->omsg_q);
     if (pmsg == NULL) {
-        log_debug(LOG_INFO, "dyn: filter stray rsp %"PRIu64" len %"PRIu32" on s %d noreply %d",
-                msg->id, msg->mlen, conn->sd, msg->noreply);
+        log_debug(LOG_INFO, "dyn: filter stray rsp %"PRIu64" len %"PRIu32" on s %d expect_datastore_reply %d",
+                msg->id, msg->mlen, conn->sd, msg->expect_datastore_reply);
         rsp_put(msg);
         return true;
     }
@@ -1456,7 +1454,7 @@ dnode_rsp_forward_match(struct context *ctx, struct conn *peer_conn, struct msg 
             dnode_rsp_swallow(ctx, peer_conn, req, rsp);
             return;
         }
-        log_warn("req %d:%d with DC_ONE consistency is not being swallowed");
+        //log_warn("req %d:%d with DC_ONE consistency is not being swallowed");
     }
 
     /* if client consistency is dc_quorum, forward the response from only the
@@ -1466,7 +1464,7 @@ dnode_rsp_forward_match(struct context *ctx, struct conn *peer_conn, struct msg 
             dnode_rsp_swallow(ctx, peer_conn, req, rsp);
             return;
         }
-        log_warn("req %d:%d with DC_QUORUM consistency is not being swallowed");
+        //log_warn("req %d:%d with DC_QUORUM consistency is not being swallowed");
     }
 
     log_debug(LOG_DEBUG, "DNODE RSP RECEIVED %s %d dmsg->id %u req %u:%u rsp %u:%u, ",
@@ -1539,7 +1537,7 @@ dnode_rsp_forward(struct context *ctx, struct conn *peer_conn, struct msg *rsp)
 
         if (!peer_conn->same_dc && req->remote_region_send_time) {
             struct stats *st = ctx->stats;
-            uint64_t delay = dn_usec_now() - req->remote_region_send_time;
+            usec_t delay = dn_usec_now() - req->remote_region_send_time;
             histo_add(&st->cross_region_histo, delay);
         }
 
@@ -1733,7 +1731,8 @@ dnode_req_send_next(struct context *ctx, struct conn *conn)
 
     ASSERT(conn->type == CONN_DNODE_PEER_SERVER);
 
-    uint32_t now = time(NULL);
+    // TODO: Not the right way to use time_t directly. FIXME
+    uint32_t now = (uint32_t)time(NULL);
     //throttling the sending traffics here
     if (!conn->same_dc) {
         if (conn->last_sent != 0) {
@@ -1768,7 +1767,7 @@ dnode_req_send_done(struct context *ctx, struct conn *conn, struct msg *msg)
        log_debug(LOG_VERB, "dnode_req_send_done entering!!!");
     }
     ASSERT(conn->type == CONN_DNODE_PEER_SERVER);
-    // crashes because dmsg is NULL :(
+    // TODO: crashes because dmsg is NULL :(
     /*log_debug(LOG_DEBUG, "DNODE REQ SEND %s %d dmsg->id %u",
               conn_get_type_string(conn), conn->sd, msg->dmsg->id);*/
 
@@ -1785,7 +1784,7 @@ dnode_req_peer_enqueue_imsgq(struct context *ctx, struct conn *conn, struct msg 
 
     log_debug(LOG_VERB, "conn %p enqueue inq %d:%d calling req_server_enqueue_imsgq",
               conn, msg->id, msg->parent_id);
-    if (!msg->noreply) {
+    if (msg->expect_datastore_reply) {
         msg_tmo_insert(msg, conn);
     }
     TAILQ_INSERT_TAIL(&conn->imsg_q, msg, s_tqe);
@@ -1899,4 +1898,63 @@ init_dnode_peer_conn(struct conn *conn)
 {
     conn->type = CONN_DNODE_PEER_SERVER;
     conn->ops = &dnode_peer_ops;
+}
+
+static int
+rack_name_cmp(const void *t1, const void *t2)
+{
+    const struct rack *s1 = t1, *s2 = t2;
+
+    return string_compare(s1->name, s2->name);
+}
+
+// The idea here is to have a designated rack in each remote region to replicate
+// data to. This is used to replicate writes to remote regions
+static void
+preselect_remote_rack_for_replication_each(void *elem, void *data)
+{
+    struct server_pool *sp = elem;
+    uint32_t dc_cnt = array_n(&sp->datacenters);
+    uint32_t dc_index;
+    uint32_t my_rack_index = 0;
+    for(dc_index = 0; dc_index < dc_cnt; dc_index++) {
+        struct datacenter *dc = array_get(&sp->datacenters, dc_index);
+        // sort the racks.
+        array_sort(&dc->racks, rack_name_cmp);
+        if (string_compare(dc->name, &sp->dc) != 0)
+            continue;
+
+        // if the dc is a local dc, get the rack_idx
+        uint32_t rack_index;
+        uint32_t rack_cnt = array_n(&dc->racks);
+        for(rack_index = 0; rack_index < rack_cnt; rack_index++) {
+            struct rack *rack = array_get(&dc->racks, rack_index);
+            if (string_compare(rack->name, &sp->rack) == 0) {
+                my_rack_index = rack_index;
+                log_notice("my rack index %u", my_rack_index);
+                break;
+            }
+        }
+    }
+
+    for(dc_index = 0; dc_index < dc_cnt; dc_index++) {
+        struct datacenter *dc = array_get(&sp->datacenters, dc_index);
+        if (string_compare(dc->name, &sp->dc) == 0)
+            continue;
+        // if the dc is a remote dc, get the rack at rack_idx
+        // use that as preselected rack for replication
+        uint32_t rack_cnt = array_n(&dc->racks);
+        uint32_t this_rack_index = my_rack_index % rack_cnt;
+        dc->preselected_rack_for_replication = array_get(&dc->racks, this_rack_index);
+        log_notice("Selected rack %.*s for remote region %.*s",
+                   dc->preselected_rack_for_replication->name->len,
+                   dc->preselected_rack_for_replication->name->data,
+                   dc->name->len, dc->name->data);
+    }
+}
+
+void
+preselect_remote_rack_for_replication(struct context *ctx)
+{
+    array_each(&ctx->pool, preselect_remote_rack_for_replication_each, NULL);
 }

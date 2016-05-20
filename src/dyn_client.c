@@ -421,7 +421,7 @@ send_rsp_integer(struct context *ctx, struct conn *c_conn, struct msg *req)
 {
     //do nothing
     struct msg *rsp = msg_get_rsp_integer(c_conn);
-    if (!req->noreply)
+    if (req->expect_datastore_reply)
         conn_enqueue_outq(ctx, c_conn, req);
     req->peer = rsp;
     rsp->peer = req;
@@ -449,8 +449,7 @@ req_forward_error(struct context *ctx, struct conn *conn, struct msg *msg,
     msg->error = 1;
     msg->err = err;
 
-    /* noreply request don't expect any response */
-    if (msg->noreply) {
+    if (!msg->expect_datastore_reply) {
         req_put(msg);
         return;
     }
@@ -584,7 +583,7 @@ local_req_forward(struct context *ctx, struct conn *c_conn, struct msg *msg,
            (c_conn->type == CONN_DNODE_PEER_CLIENT));
 
     /* enqueue message (request) into client outq, if response is expected */
-    if (!msg->noreply) {
+    if (msg->expect_datastore_reply) {
         conn_enqueue_outq(ctx, c_conn, msg);
     }
 
@@ -787,8 +786,9 @@ req_forward_remote_dc(struct context *ctx, struct conn *c_conn, struct msg *msg,
     if (rack_cnt == 0)
         return;
 
-    uint32_t ran_index = (uint32_t)rand() % rack_cnt;
-    struct rack *rack = array_get(&dc->racks, ran_index);
+    struct rack *rack = dc->preselected_rack_for_replication;
+    if (rack == NULL)
+        rack = array_get(&dc->racks, 0);
 
     struct msg *rack_msg = msg_get(c_conn, msg->request, msg->data_store, __FUNCTION__);
     if (rack_msg == NULL) {
@@ -990,7 +990,7 @@ msg_quorum_rsp_handler(struct msg *req, struct msg *rsp)
     return DN_OK;
 }
 
-void
+static void
 req_client_enqueue_omsgq(struct context *ctx, struct conn *conn, struct msg *msg)
 {
     ASSERT(msg->request);
@@ -1002,14 +1002,14 @@ req_client_enqueue_omsgq(struct context *ctx, struct conn *conn, struct msg *msg
     log_debug(LOG_VERB, "conn %p enqueue outq %d:%d", conn, msg->id, msg->parent_id);
 }
 
-void
+static void
 req_client_dequeue_omsgq(struct context *ctx, struct conn *conn, struct msg *msg)
 {
     ASSERT(msg->request);
     ASSERT(conn->type == CONN_CLIENT);
 
     if (msg->stime_in_microsec) {
-        uint64_t latency = dn_usec_now() - msg->stime_in_microsec;
+        usec_t latency = dn_usec_now() - msg->stime_in_microsec;
         stats_histo_add_latency(ctx, latency);
     }
     conn->omsg_count--;

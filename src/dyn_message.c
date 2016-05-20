@@ -149,7 +149,7 @@ static struct msg_tqh free_msgq; /* free msg q */
 static struct rbtree tmo_rbt;    /* timeout rbtree */
 static struct rbnode tmo_rbs;    /* timeout rbtree sentinel */
 static size_t alloc_msgs_max;	 /* maximum number of allowed allocated messages */
-int8_t g_timeout_factor = 1;
+uint8_t g_timeout_factor = 1;
 
 static inline rstatus_t
 msg_cant_handle_response(struct msg *req, struct msg *rsp)
@@ -186,10 +186,10 @@ void
 msg_tmo_insert(struct msg *msg, struct conn *conn)
 {
     struct rbnode *node;
-    int timeout;
+    msec_t timeout;
 
     //ASSERT(msg->request);
-    ASSERT(!msg->quit && !msg->noreply);
+    ASSERT(!msg->quit && msg->expect_datastore_reply);
 
     timeout = conn->dyn_mode? dnode_peer_timeout(msg, conn) : server_timeout(conn);
     if (timeout <= 0) {
@@ -271,7 +271,7 @@ done:
     msg->parent_id = 0;
     msg->peer = NULL;
     msg->owner = NULL;
-    msg->stime_in_microsec = 0L;
+    msg->stime_in_microsec = 0ULL;
     msg->remote_region_send_time = 0L;
     msg->awaiting_rsps = 0;
     msg->selected_rsp = NULL;
@@ -317,7 +317,7 @@ done:
     msg->ferror = 0;
     msg->request = 0;
     msg->quit = 0;
-    msg->noreply = 0;
+    msg->expect_datastore_reply = 1;
     msg->done = 0;
     msg->fdone = 0;
     msg->first_fragment = 0;
@@ -424,7 +424,7 @@ msg_clone(struct msg *src, struct mbuf *mbuf_start, struct msg *target)
     target->pre_coalesce = src->pre_coalesce;
     target->post_coalesce = src->post_coalesce;
 
-    target->noreply = src->noreply;
+    target->expect_datastore_reply = src->expect_datastore_reply;
     target->swallow = src->swallow;
     target->type = src->type;
     target->key_start = src->key_start;
@@ -596,7 +596,8 @@ uint32_t msg_length(struct msg *msg)
     struct mbuf *mbuf;
 
     STAILQ_FOREACH(mbuf, &msg->mhdr, next) {
-        count += mbuf->last - mbuf->start;
+        ASSERT(mbuf->last >= mbuf->start);
+        count += (uint32_t)(mbuf->last - mbuf->start);
     }
 
     return count;
@@ -689,7 +690,7 @@ msg_payload_crc32(struct msg *msg)
             }
         }
 
-        crc = crc32_sz(start, end - start, crc);
+        crc = crc32_sz((char *)start, end - start, crc);
     }
     return crc;
 

@@ -26,6 +26,7 @@
 #include "dyn_core.h"
 #include "dyn_dnode_msg.h"
 #include "dyn_response_mgr.h"
+#include "dyn_types.h"
 
 #define ALLOC_MSGS					  200000
 #define MIN_ALLOC_MSGS		     	  100000
@@ -37,7 +38,6 @@ typedef void (*func_msg_parse_t)(struct msg *);
 typedef rstatus_t (*func_msg_post_splitcopy_t)(struct msg *);
 typedef void (*func_msg_coalesce_t)(struct msg *r);
 typedef rstatus_t (*msg_response_handler_t)(struct msg *req, struct msg *rsp);
-typedef uint64_t msgid_t;
 typedef rstatus_t (*func_msg_reply_t)(struct msg *r);
 typedef bool (*func_msg_failure_t)(struct msg *r);
 
@@ -183,6 +183,7 @@ typedef enum msg_type {
     MSG_RSP_REDIS_INTEGER,
     MSG_RSP_REDIS_BULK,
     MSG_RSP_REDIS_MULTIBULK,
+	MSG_REQ_REDIS_CONFIG,
     MSG_RSP_REDIS_ERROR,
     MSG_RSP_REDIS_ERROR_ERR,
     MSG_RSP_REDIS_ERROR_OOM,
@@ -231,7 +232,7 @@ get_consistency_string(consistency_t cons)
 #define DEFAULT_WRITE_CONSISTENCY DC_ONE
 extern consistency_t g_write_consistency;
 extern consistency_t g_read_consistency;
-extern int8_t g_timeout_factor;
+extern uint8_t g_timeout_factor;
 
 struct msg {
     TAILQ_ENTRY(msg)     c_tqe;           /* link in client q */
@@ -241,8 +242,8 @@ struct msg {
     msgid_t              id;              /* message id */
     struct msg           *peer;           /* message peer */
     struct conn          *owner;          /* message owner - client | server */
-    int64_t              stime_in_microsec;  /* start time in microsec */
-    int64_t              remote_region_send_time; /* time in microsec when message sent to remote region */
+    usec_t               stime_in_microsec;  /* start time in microsec */
+    usec_t               remote_region_send_time; /* time in microsec when message sent to remote region */
     uint8_t              awaiting_rsps;
     struct msg           *selected_rsp;
 
@@ -287,7 +288,7 @@ struct msg {
     unsigned             ferror:1;        /* one or more fragments are in error? */
     unsigned             request:1;       /* request? or response? */
     unsigned             quit:1;          /* quit request? */
-    unsigned             noreply:1;       /* noreply? */
+    unsigned             expect_datastore_reply:1;       /* expect datastore reply */
     unsigned             done:1;          /* done? */
     unsigned             fdone:1;         /* all fragments are done? */
     unsigned             first_fragment:1;/* first fragment? */
